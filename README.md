@@ -1,6 +1,9 @@
 # EQ Legends Companion
 
-A Windows desktop companion for **EverQuest Legends**. It reads the log file the game
+> [!NOTE]
+> **macOS Fork:** This repository is a fork of [jmoyers/everquest-companion](https://github.com/jmoyers/everquest-companion) adding native macOS build, packaging, and runtime support (Apple Silicon `arm64` and Intel `x64`).
+
+A desktop companion for **EverQuest Legends**. It reads the log file the game
 already writes and turns it into live, useful views — a DPS meter, floating overlays,
 quest and loot tracking, alerts.
 
@@ -29,6 +32,16 @@ Everything is per-character; switch characters and the app re-reads that log.
 
 ## Getting started
 
+### macOS
+
+1. Download the `.dmg` (`arm64` for Apple Silicon or `x64` for Intel) from your releases, or build it locally with `npm run dist:mac`.
+2. Drag `EQ Legends Companion.app` to `/Applications`.
+3. In EverQuest, ensure logging is on: `/log on`.
+4. Launch the app and go to **Settings** to point the log directory to your EverQuest log path (for instance, inside your CrossOver bottle, Wine prefix, or VM/network share).
+5. **Gatekeeper note:** Because local/fork builds are not signed with an Apple Developer certificate, macOS will block them on first launch. Right-click `EQ Legends Companion.app` and select **Open**, or allow it in **System Settings → Privacy & Security**.
+
+### Windows
+
 **Requires 64-bit Windows 10 or 11.** Windows 8.1 and older can't run it — the installer
 checks and stops with a message rather than leaving you an app that won't start.
 
@@ -45,9 +58,9 @@ install lives somewhere else, point it at the right folder in **Settings**.
 Overlays sit on top of the game in **windowed** or **borderless** mode. Exclusive
 fullscreen can't be overlaid by anything, so use borderless if you want them.
 
-### Code signing
+### Code signing (Windows)
 
-The installer is code-signed as **Joshua Moyers** through Microsoft's Artifact
+The Windows installer is code-signed as **Joshua Moyers** through Microsoft's Artifact
 Signing service, and auto-updates are verified against that signature before they
 install. If SmartScreen still shows a "Windows protected your PC" warning while
 the certificate is new, click **More info**, then **Run anyway** — you only ever
@@ -141,6 +154,37 @@ the retention details.
 
 Contributions welcome. Everything about building, testing, and the architecture lives in
 [`AGENTS.md`](AGENTS.md) — start there.
+
+### Prerequisites & Required Tools
+
+To build the app and its native background data engine from source, you will need:
+
+- **Node.js** (v20 or newer) and **npm**
+- **Rust & Cargo** (1.98.0 or newer): Required to compile the background data-server engine (`engined`).
+  - macOS: `brew install rust` or via [rustup.rs](https://rustup.rs/)
+  - Windows: via [rustup.rs](https://rustup.rs/)
+- **C/C++ Build Tools**:
+  - macOS: Xcode Command Line Tools (`xcode-select --install`)
+  - Windows: Visual Studio C++ Build Tools
+
+### Building & Packaging
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Run in development mode (Electron hot reload)
+npm run dev
+
+# 3. Build release packages for macOS (.dmg and .zip for arm64 & x64)
+npm run dist:mac
+
+# Or build unpacked .app directory only (faster for testing)
+npm run dist:mac:dir
+
+# 4. Build release package for Windows (NSIS installer)
+npm run dist
+```
 
 ## License
 
