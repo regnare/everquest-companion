@@ -82,10 +82,14 @@ function listEntries(key: string): string[] {
 }
 
 /** The one `extraResources` matcher, as the three fields that decide everything below. */
-function engineMatcher(): { from: string; to: string; filter: string } {
-  const block = /extraResources:\n\s*- from: (\S+)\n\s*to: (\S+)\n\s*filter:\n\s*- (\S+)\n/.exec(builderYml)
+function engineMatcher(): { from: string; to: string; filter: string; filters: string[] } {
+  const block = /extraResources:\n\s*- from: (\S+)\n\s*to: (\S+)\n\s*filter:\n((?:\s*- \S+\n)+)/.exec(builderYml)
   assert.ok(block, 'electron-builder.yml must ship the engine via an extraResources matcher')
-  return { from: block[1], to: block[2], filter: block[3] }
+  const filters = block[3]
+    .split('\n')
+    .map((l) => l.replace(/^\s*- /, '').trim())
+    .filter(Boolean)
+  return { from: block[1], to: block[2], filter: filters[0], filters }
 }
 
 // =========================================================================================
@@ -93,11 +97,11 @@ function engineMatcher(): { from: string; to: string; filter: string } {
 // =========================================================================================
 
 test('THE SHIPPED PATH IS THE PROBED PATH — composed, not restated', () => {
-  const { to, filter } = engineMatcher()
+  const { to, filters } = engineMatcher()
   // `to` is relative to the packaged `resources/` directory (extraResources' base), so the file's
   // packaged address is exactly this. `resourcesPath` is a stand-in: what is being compared is the
   // SHAPE below the resources root, which is the half the two files have to agree on.
-  const shipped = `RES/${to}/${filter}`
+  const shipped = `RES/${to}/${ENGINE_BIN_NAME}`
   const [firstPackagedCandidate] = engineBinaryCandidates({
     appPath: '',
     resourcesPath: 'RES'
@@ -109,16 +113,23 @@ test('THE SHIPPED PATH IS THE PROBED PATH — composed, not restated', () => {
       'packaged candidates — a mismatch here is a packaged app that silently runs with no engine'
   )
   // …and the name is the resolver's own constant rather than a second spelling of it.
-  assert.equal(filter, ENGINE_BIN_NAME)
+  assert.ok(
+    filters.includes(ENGINE_BIN_NAME),
+    `filters must include ${ENGINE_BIN_NAME} for this platform`
+  )
 })
 
 test('the binary comes out of cargo`s RELEASE directory, and only the binary does', () => {
-  const { from, filter } = engineMatcher()
+  const { from, filters } = engineMatcher()
   assert.equal(from, 'engine/target/release')
   // The filter is load-bearing for SIZE, not just tidiness: `engine/target/release` also holds
   // deps/, build/, incremental/ and a 1.6 MB .pdb. `createFilter` prunes a non-matching directory
   // before walking into it, so the copy visits one file.
-  assert.equal(filter, 'engined.exe')
+  assert.ok(
+    filters.every((f) => f === 'engined.exe' || f === 'engined'),
+    'filters must only include the engine binary'
+  )
+  assert.ok(filters.includes('engined.exe'))
 })
 
 test('the engine is NOT in `files`, and therefore needs no asarUnpack entry', () => {
@@ -173,7 +184,10 @@ test('nothing in the config narrows the signable set out from under the engine',
   assert.equal(/signExecutable: false/.test(builderYml), false)
   assert.equal(/signAndEditExecutable: false/.test(builderYml), false)
   // …and the file that gets signed has to be the extension `shouldSignFile` recognises.
-  assert.match(engineMatcher().filter, /\.exe$/)
+  assert.ok(
+    engineMatcher().filters.some((f) => /\.exe$/.test(f)),
+    'filters must include an .exe for Windows signing'
+  )
 })
 
 // =========================================================================================
@@ -186,7 +200,7 @@ test('BOTH dist scripts build the engine BEFORE packaging', () => {
   // additionally asserts cargo actually left a binary behind (scripts/build-engine.mts).
   const scripts = JSON.parse(packageJson) as { scripts: Record<string, string> }
   assert.match(scripts.scripts['build:engine'], /build-engine\.mts/)
-  for (const name of ['dist', 'dist:dir']) {
+  for (const name of ['dist', 'dist:dir', 'dist:mac', 'dist:mac:dir']) {
     const script = scripts.scripts[name]
     assert.ok(script.includes('build:engine'), `${name} must build the engine`)
     assert.ok(
@@ -203,17 +217,42 @@ test('ROUND TRIP: the resolver finds the engine in a real dist:dir output', (t) 
   // in the file that checks a real packaged tree rather than a config — the two halves of the
   // question ("does the config say the right path" and "is a binary actually at it") answered by
   // the code that will ask it at runtime.
-  const unpacked = join(ROOT, 'release', version(), 'win-unpacked')
-  if (!existsSync(join(unpacked, 'resources', 'engine', ENGINE_BIN_NAME))) {
-    t.skip('no dist:dir output — run `npm run dist:dir`')
+  const winResources = join(ROOT, 'release', version(), 'win-unpacked', 'resources')
+  const macArm64Resources = join(
+    ROOT,
+    'release',
+    version(),
+    'mac-arm64',
+    'EQ Legends Companion.app',
+    'Contents',
+    'Resources'
+  )
+  const macResources = join(
+    ROOT,
+    'release',
+    version(),
+    'mac',
+    'EQ Legends Companion.app',
+    'Contents',
+    'Resources'
+  )
+  const resourcesDir = existsSync(join(macArm64Resources, 'engine', ENGINE_BIN_NAME))
+    ? macArm64Resources
+    : existsSync(join(macResources, 'engine', ENGINE_BIN_NAME))
+      ? macResources
+      : existsSync(join(winResources, 'engine', ENGINE_BIN_NAME))
+        ? winResources
+        : null
+  if (resourcesDir === null) {
+    t.skip('no dist:dir or dist:mac:dir output — run `npm run dist:dir` or `npm run dist:mac:dir`')
     return
   }
   // What Electron hands `resolveEngineBinary` in a packaged app: the asar as appPath, the
   // resources directory as resourcesPath.
   const candidates = engineBinaryCandidates({
-    appPath: join(unpacked, 'resources', 'app.asar'),
-    resourcesPath: join(unpacked, 'resources'),
-    cwd: unpacked
+    appPath: join(resourcesDir, 'app.asar'),
+    resourcesPath: resourcesDir,
+    cwd: dirname(resourcesDir)
   })
   const found = candidates.find((path) => existsSync(path))
   // The resolver joins with `/` and leaves the caller's separators alone, so this is the exact
@@ -221,7 +260,7 @@ test('ROUND TRIP: the resolver finds the engine in a real dist:dir output', (t) 
   // would hide a resolver that had started rewriting paths.
   assert.equal(
     found,
-    `${join(unpacked, 'resources')}/engine/${ENGINE_BIN_NAME}`,
+    `${resourcesDir}/engine/${ENGINE_BIN_NAME}`,
     `the first candidate that exists must be the shipped engine; looked in ${candidates.join(', ')}`
   )
 })

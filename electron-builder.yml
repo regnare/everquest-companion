@@ -97,6 +97,7 @@ extraResources:
     to: engine
     filter:
       - engined.exe
+      - engined
 
 asarUnpack:
   - resources/**
